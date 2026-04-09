@@ -8,17 +8,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.agent.main_agent import MultiStepRAGAgent
 from app.tools.vector_search import SearchTool, SearchConfig
-from app.configs.llm import OllamaLLM
-from app.configs.prompts import (
+from app.core.llm import OllamaLLM
+from app.core.prompts import (
     ROUTER_PROMPT, 
     EXPANSION_PROMPT, 
     RERANKER_PROMPT,
     ANSWER_PROMPT,
     TOOL_SELECTION_PROMPT,
 )
-from app.configs.agent_settings import AgentSettings
-from app.configs.consts import OLLAMA_URL, OLLAMA_MODEL, SEARCH_URL, COLLECTIONS
-from app.configs.models import AgentConfigRequest, AgentResponse, SourceDocument, HealthResponse
+from app.core.agent_settings import AgentSettings
+from app.core.consts import OLLAMA_URL, OLLAMA_MODEL, SEARCH_URL, COLLECTIONS
+from app.core.models import AgentConfigRequest, AgentResponse, SourceDocument, HealthResponse
 
 logger = logging.getLogger(__name__)
 
