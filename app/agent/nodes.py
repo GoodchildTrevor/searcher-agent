@@ -37,7 +37,7 @@ class RouterNode(BaseNode):
             ctx.confidence_score = 0.0
             ctx.metadata["router_decision"] = "no_context"
             ctx.metrics["routing_decisions"] = ctx.metrics.get("routing_decisions", 0) + 1
-            logger.info(f"[{self.name}] No context available, routing → TOOL_SELECTION")  # <<< NEW
+            logger.info("[%s] No context available, routing → TOOL_SELECTION", self.name)
             return AgentState.TOOL_SELECTION
 
         prompt = self.router_prompt.format(
@@ -45,15 +45,14 @@ class RouterNode(BaseNode):
             context=context_text[:3000]
         )
 
-        logger.debug(f"[{self.name}] Prompt: {prompt[:500]}...")
+        logger.debug("[%s] Prompt: %s...", self.name, prompt[:500])
         logger.info(
-            f"[{self.name}] Request: query_len={len(ctx.query)}, "
-            f"context_docs={len(ctx.current_context)}, "
-            f"context_len={len(context_text)}"
+            "[%s] Request: query_len=%d, context_docs=%d, context_len=%d",
+            self.name, len(ctx.query), len(ctx.current_context), len(context_text)
         )
 
         answer_found = False
-        start_time = asyncio.get_event_loop().time()
+        start_time = asyncio.get_running_loop().time()
 
         try:
             response = await self.llm.generate_async(
@@ -61,11 +60,11 @@ class RouterNode(BaseNode):
                 options={"temperature": 0.1, "num_predict": 50}
             )
 
-            elapsed = asyncio.get_event_loop().time() - start_time
+            elapsed = asyncio.get_running_loop().time() - start_time
             self._track_llm_metric(ctx, elapsed, "router")
 
-            logger.info(f"[{self.name}] Response: len={len(response)}, time={elapsed:.2f}s")
-            logger.debug(f"[{self.name}] Raw response: {response.strip()}")
+            logger.info("[%s] Response: len=%d, time=%.2fs", self.name, len(response), elapsed)
+            logger.debug("[%s] Raw response: %s", self.name, response.strip())
 
             try:
                 json_str = self._extract_json(response) or response.strip()
@@ -74,12 +73,12 @@ class RouterNode(BaseNode):
                 ctx.metrics["router_successful_parses"] = (
                     ctx.metrics.get("router_successful_parses", 0) + 1
                 )
-                logger.info(f"[{self.name}] Parsed answer_found={answer_found}")
+                logger.info("[%s] Parsed answer_found=%s", self.name, answer_found)
 
             except (json.JSONDecodeError, ValueError, KeyError, TypeError) as e:
                 logger.warning(
-                    f"[{self.name}] Parse error, treating as answer_found=False: {e}. "
-                    f"Raw: {response.strip()[:100]}"
+                    "[%s] Parse error, treating as answer_found=False: %s. Raw: %s",
+                    self.name, e, response.strip()[:100]
                 )
                 answer_found = False
                 ctx.metrics["router_parse_errors"] = (
@@ -87,8 +86,8 @@ class RouterNode(BaseNode):
                 )
 
         except Exception as e:
-            elapsed = asyncio.get_event_loop().time() - start_time
-            logger.error(f"[{self.name}] LLM error after {elapsed:.2f}s: {e}")
+            elapsed = asyncio.get_running_loop().time() - start_time
+            logger.error("[%s] LLM error after %.2fs: %s", self.name, elapsed, e)
             ctx.metadata["router_error"] = str(e)
             ctx.metrics["router_llm_errors"] = (
                 ctx.metrics.get("router_llm_errors", 0) + 1
@@ -109,14 +108,14 @@ class RouterNode(BaseNode):
                 ctx.metrics["high_confidence_routes"] = (
                     ctx.metrics.get("high_confidence_routes", 0) + 1
                 )
-                logger.info(f"[{self.name}] Decision: sufficient_context → ANSWERING")  # <<< NEW
+                logger.info("[%s] Decision: sufficient_context → ANSWERING", self.name)
                 return AgentState.ANSWERING
             else:
                 ctx.metadata["router_decision"] = "sufficient_context → GIVE_INFO"
                 ctx.metrics["info_only_routes"] = (
                     ctx.metrics.get("info_only_routes", 0) + 1
                 )
-                logger.info(f"[{self.name}] Decision: sufficient_context → GIVE_INFO")  # <<< NEW
+                logger.info("[%s] Decision: sufficient_context → GIVE_INFO", self.name)
                 return AgentState.GIVE_INFO
 
         if ctx.can_search_more():
@@ -124,9 +123,9 @@ class RouterNode(BaseNode):
                 f"need_more_info (iteration {ctx.current_iterations}) → TOOL_SELECTION"
             )
             ctx.metrics["search_routes"] = ctx.metrics.get("search_routes", 0) + 1
-            logger.info(  # <<< NEW
-                f"[{self.name}] Decision: need_more_info "
-                f"(iteration {ctx.current_iterations}/{ctx.max_iterations}) → TOOL_SELECTION"
+            logger.info(
+                "[%s] Decision: need_more_info (iteration %d/%d) → TOOL_SELECTION",
+                self.name, ctx.current_iterations, ctx.max_iterations
             )
             return AgentState.TOOL_SELECTION
 
@@ -136,9 +135,9 @@ class RouterNode(BaseNode):
         ctx.metrics["forced_answer_routes"] = (
             ctx.metrics.get("forced_answer_routes", 0) + 1
         )
-        logger.warning(  # <<< NEW (warning, not info — forced path is notable)
-            f"[{self.name}] Decision: max_iterations_reached "
-            f"({ctx.current_iterations}/{ctx.max_iterations}) → ANSWERING (forced)"
+        logger.warning(
+            "[%s] Decision: max_iterations_reached (%d/%d) → ANSWERING (forced)",
+            self.name, ctx.current_iterations, ctx.max_iterations
         )
         return AgentState.ANSWERING
 
@@ -174,24 +173,23 @@ class ToolSelectionNode(BaseNode):
             tools=tools_desc,
         )
 
-        logger.debug(f"[{self.name}] Prompt: {prompt[:500]}...")
-        logger.info(  # <<< NEW
-            f"[{self.name}] Request: query_len={len(ctx.query)}, "
-            f"available_tools={list(self.available_tools.keys())}, "
-            f"context_docs={len(ctx.current_context)}"
+        logger.debug("[%s] Prompt: %s...", self.name, prompt[:500])
+        logger.info(
+            "[%s] Request: query_len=%d, available_tools=%s, context_docs=%d",
+            self.name, len(ctx.query), list(self.available_tools.keys()), len(ctx.current_context)
         )
 
-        start_time = asyncio.get_event_loop().time()
+        start_time = asyncio.get_running_loop().time()
         try:
             response = await self.llm.generate_async(
                 prompt,
                 options={"temperature": 0.1, "num_predict": 100}
             )
 
-            elapsed = asyncio.get_event_loop().time() - start_time
+            elapsed = asyncio.get_running_loop().time() - start_time
             self._track_llm_metric(ctx, elapsed, "tool_selection")
-            logger.info(f"[{self.name}] Response: len={len(response)}, time={elapsed:.2f}s")  # <<< NEW
-            logger.debug(f"[{self.name}] Raw response: {response.strip()}")  # <<< NEW
+            logger.info("[%s] Response: len=%d, time=%.2fs", self.name, len(response), elapsed)
+            logger.debug("[%s] Raw response: %s", self.name, response.strip())
 
             json_str = self._extract_json(response)
             if json_str:
@@ -202,34 +200,34 @@ class ToolSelectionNode(BaseNode):
                             t for t in tools_list
                             if t in self.available_tools
                         ]
-                        # <<< NEW: warn about tools requested but not available
                         unknown = [t for t in tools_list if t not in self.available_tools]
                         if unknown:
                             logger.warning(
-                                f"[{self.name}] LLM requested unknown tools, skipping: {unknown}"
+                                "[%s] LLM requested unknown tools, skipping: %s",
+                                self.name, unknown
                             )
                         ctx.metrics["tool_selection_success"] = ctx.metrics.get("tool_selection_success", 0) + 1
                         ctx.metrics["tools_selected_count"] = ctx.metrics.get("tools_selected_count", 0) + len(ctx.selected_tools)
-                        logger.info(f"[{self.name}] Selected tools: {ctx.selected_tools}")  # <<< NEW
+                        logger.info("[%s] Selected tools: %s", self.name, ctx.selected_tools)
                     else:
                         ctx.selected_tools = []
                         ctx.metrics["tool_selection_invalid_format"] = ctx.metrics.get("tool_selection_invalid_format", 0) + 1
-                        logger.warning(f"[{self.name}] Invalid format (expected list), no tools selected")  # <<< NEW
+                        logger.warning("[%s] Invalid format (expected list), no tools selected", self.name)
                 except json.JSONDecodeError as e:
                     ctx.selected_tools = []
                     ctx.metrics["tool_selection_json_error"] = ctx.metrics.get("tool_selection_json_error", 0) + 1
-                    logger.warning(f"[{self.name}] JSON decode error: {e}. Raw: {json_str[:100]}")  # <<< NEW
+                    logger.warning("[%s] JSON decode error: %s. Raw: %s", self.name, e, json_str[:100])
             else:
                 ctx.selected_tools = []
                 ctx.metrics["tool_selection_no_json"] = ctx.metrics.get("tool_selection_no_json", 0) + 1
-                logger.warning(f"[{self.name}] No JSON found in response, no tools selected")  # <<< NEW
+                logger.warning("[%s] No JSON found in response, no tools selected", self.name)
 
             ctx.metadata["selected_tools"] = ctx.selected_tools
             ctx.current_tool_index = 0
 
         except Exception as e:
-            elapsed = asyncio.get_event_loop().time() - start_time
-            logger.error(f"[{self.name}] Error after {elapsed:.2f}s: {e}")
+            elapsed = asyncio.get_running_loop().time() - start_time
+            logger.error("[%s] Error after %.2fs: %s", self.name, elapsed, e)
             ctx.selected_tools = []
             ctx.metadata["tool_selection_error"] = str(e)
             ctx.metrics["tool_selection_llm_errors"] = ctx.metrics.get("tool_selection_llm_errors", 0) + 1
@@ -256,17 +254,18 @@ class ExpansionNode(BaseNode):
 
     async def process(self, ctx: AgentContext) -> AgentContext:
         if ctx.current_tool_index >= len(ctx.selected_tools):
-            logger.warning(  # <<< NEW
-                f"[{self.name}] current_tool_index={ctx.current_tool_index} "
-                f">= selected_tools={len(ctx.selected_tools)}, skipping expansion"
+            logger.warning(
+                "[%s] current_tool_index=%d >= selected_tools=%d, skipping expansion",
+                self.name, ctx.current_tool_index, len(ctx.selected_tools)
             )
             return ctx
 
         current_tool_name = ctx.selected_tools[ctx.current_tool_index]
-        logger.info(  # <<< NEW
-            f"[{self.name}] Expanding query for tool '{current_tool_name}' "
-            f"(tool {ctx.current_tool_index + 1}/{len(ctx.selected_tools)}), "
-            f"count={self.expansion_count}"
+        logger.info(
+            "[%s] Expanding query for tool '%s' (tool %d/%d), count=%d",
+            self.name, current_tool_name,
+            ctx.current_tool_index + 1, len(ctx.selected_tools),
+            self.expansion_count
         )
 
         previous_queries = []
@@ -276,7 +275,7 @@ class ExpansionNode(BaseNode):
 
         history_text = "\n".join(f"{m['role']}: {m['content']}" for m in ctx.chat_history[-5:])
 
-        start_time = asyncio.get_event_loop().time()
+        start_time = asyncio.get_running_loop().time()
         try:
             response = await asyncio.wait_for(
                 self.llm.generate_async(
@@ -295,10 +294,10 @@ class ExpansionNode(BaseNode):
                 timeout=self.timeout
             )
 
-            elapsed = asyncio.get_event_loop().time() - start_time
+            elapsed = asyncio.get_running_loop().time() - start_time
             self._track_llm_metric(ctx, elapsed, "expansion")
-            logger.info(f"[{self.name}] Response: len={len(response)}, time={elapsed:.2f}s")  # <<< NEW
-            logger.debug(f"[{self.name}] Raw response: {response.strip()}")  # <<< NEW
+            logger.info("[%s] Response: len=%d, time=%.2fs", self.name, len(response), elapsed)
+            logger.debug("[%s] Raw response: %s", self.name, response.strip())
 
             json_str = self._extract_json(response)
             if json_str:
@@ -310,43 +309,43 @@ class ExpansionNode(BaseNode):
                         ctx.tool_specific_queries[current_tool_name] = queries[:self.expansion_count + 1]
                         ctx.metrics["expansion_success"] = ctx.metrics.get("expansion_success", 0) + 1
                         ctx.metrics["queries_generated"] = ctx.metrics.get("queries_generated", 0) + len(queries)
-                        logger.info(  # <<< NEW
-                            f"[{self.name}] Generated {len(ctx.tool_specific_queries[current_tool_name])} "
-                            f"queries for '{current_tool_name}': "
-                            f"{ctx.tool_specific_queries[current_tool_name]}"
+                        logger.info(
+                            "[%s] Generated %d queries for '%s': %s",
+                            self.name, len(ctx.tool_specific_queries[current_tool_name]),
+                            current_tool_name, ctx.tool_specific_queries[current_tool_name]
                         )
                     else:
                         ctx.tool_specific_queries[current_tool_name] = [ctx.query]
                         ctx.metrics["expansion_invalid_format"] = ctx.metrics.get("expansion_invalid_format", 0) + 1
-                        logger.warning(  # <<< NEW
-                            f"[{self.name}] Invalid expansion format for '{current_tool_name}', "
-                            f"falling back to original query"
+                        logger.warning(
+                            "[%s] Invalid expansion format for '%s', falling back to original query",
+                            self.name, current_tool_name
                         )
                 except json.JSONDecodeError as e:
                     ctx.tool_specific_queries[current_tool_name] = [ctx.query]
                     ctx.metrics["expansion_json_error"] = ctx.metrics.get("expansion_json_error", 0) + 1
-                    logger.warning(  # <<< NEW
-                        f"[{self.name}] JSON decode error for '{current_tool_name}': {e}, "
-                        f"falling back to original query"
+                    logger.warning(
+                        "[%s] JSON decode error for '%s': %s, falling back to original query",
+                        self.name, current_tool_name, e
                     )
             else:
                 ctx.tool_specific_queries[current_tool_name] = [ctx.query]
                 ctx.metrics["expansion_no_json"] = ctx.metrics.get("expansion_no_json", 0) + 1
-                logger.warning(  # <<< NEW
-                    f"[{self.name}] No JSON found in response for '{current_tool_name}', "
-                    f"falling back to original query"
+                logger.warning(
+                    "[%s] No JSON found in response for '%s', falling back to original query",
+                    self.name, current_tool_name
                 )
 
         except asyncio.TimeoutError:
-            elapsed = asyncio.get_event_loop().time() - start_time
-            logger.error(f"[{self.name}] Timeout for {current_tool_name} after {elapsed:.2f}s")
+            elapsed = asyncio.get_running_loop().time() - start_time
+            logger.error("[%s] Timeout for %s after %.2fs", self.name, current_tool_name, elapsed)
             ctx.tool_specific_queries[current_tool_name] = [ctx.query]
             ctx.metadata[f"expansion_timeout_{current_tool_name}"] = True
             ctx.metrics["expansion_timeouts"] = ctx.metrics.get("expansion_timeouts", 0) + 1
 
         except Exception as e:
-            elapsed = asyncio.get_event_loop().time() - start_time
-            logger.error(f"[{self.name}] Error for {current_tool_name} after {elapsed:.2f}s: {e}")
+            elapsed = asyncio.get_running_loop().time() - start_time
+            logger.error("[%s] Error for %s after %.2fs: %s", self.name, current_tool_name, elapsed, e)
             ctx.tool_specific_queries[current_tool_name] = [ctx.query]
             ctx.metadata[f"expansion_error_{current_tool_name}"] = str(e)
             ctx.metrics["expansion_errors"] = ctx.metrics.get("expansion_errors", 0) + 1
@@ -364,9 +363,9 @@ class RetrievalNode:
 
     async def process(self, ctx: AgentContext) -> AgentContext:
         if ctx.current_tool_index >= len(ctx.selected_tools):
-            logger.warning(  # <<< NEW
-                f"[retrieval] current_tool_index={ctx.current_tool_index} "
-                f">= selected_tools={len(ctx.selected_tools)}, skipping retrieval"
+            logger.warning(
+                "[retrieval] current_tool_index=%d >= selected_tools=%d, skipping retrieval",
+                ctx.current_tool_index, len(ctx.selected_tools)
             )
             return ctx
 
@@ -374,24 +373,24 @@ class RetrievalNode:
         current_tool = self.tools_registry.get(current_tool_name)
 
         if not current_tool:
-            logger.error(f"Tool {current_tool_name} not found in registry")
+            logger.error("Tool %s not found in registry", current_tool_name)
             ctx.metrics["retrieval_tool_not_found"] = ctx.metrics.get("retrieval_tool_not_found", 0) + 1
             return ctx
 
         queries = ctx.tool_specific_queries.get(current_tool_name, [ctx.query])
-        logger.info(  # <<< NEW
-            f"[retrieval] Starting retrieval with tool '{current_tool_name}', "
-            f"queries={len(queries)}, top_k=5"
+        logger.info(
+            "[retrieval] Starting retrieval with tool '%s', queries=%d, top_k=5",
+            current_tool_name, len(queries)
         )
-        logger.debug(f"[retrieval] Queries: {queries}")  # <<< NEW
+        logger.debug("[retrieval] Queries: %s", queries)
 
-        start_time = asyncio.get_event_loop().time()
+        start_time = asyncio.get_running_loop().time()
         try:
             results = await current_tool.batch_search_async(queries=queries, top_k=5)
-            elapsed = asyncio.get_event_loop().time() - start_time
-            logger.info(  # <<< NEW
-                f"[retrieval] Tool '{current_tool_name}' returned results "
-                f"for {len(results)} queries in {elapsed:.2f}s"
+            elapsed = asyncio.get_running_loop().time() - start_time
+            logger.info(
+                "[retrieval] Tool '%s' returned results for %d queries in %.2fs",
+                current_tool_name, len(results), elapsed
             )
 
             ctx.metrics["search_calls"] += len(queries)
@@ -416,7 +415,7 @@ class RetrievalNode:
                 doc_copy["tool"] = current_tool_name
 
                 if doc_id and doc_id in seen_ids:
-                    logger.debug(f"[retrieval] Skipping duplicate doc id={doc_id}")  # <<< NEW
+                    logger.debug("[retrieval] Skipping duplicate doc id=%s", doc_id)
                     continue
 
                 ctx.current_context.append(doc_copy)
@@ -431,16 +430,17 @@ class RetrievalNode:
             ctx.metadata[f"new_docs_{current_tool_name}"] = new_docs_count
             ctx.metrics["retrieval_success"] = ctx.metrics.get("retrieval_success", 0) + 1
 
-            logger.info(  # <<< NEW
-                f"[retrieval] Tool '{current_tool_name}': "
-                f"total_raw={len(ctx.tool_results[current_tool_name])}, "
-                f"new_unique={new_docs_count}, "
-                f"total_context={len(ctx.current_context)}"
+            logger.info(
+                "[retrieval] Tool '%s': total_raw=%d, new_unique=%d, total_context=%d",
+                current_tool_name,
+                len(ctx.tool_results[current_tool_name]),
+                new_docs_count,
+                len(ctx.current_context)
             )
 
         except Exception as e:
-            elapsed = asyncio.get_event_loop().time() - start_time
-            logger.error(f"Retrieval error for {current_tool_name} after {elapsed:.2f}s: {e}")
+            elapsed = asyncio.get_running_loop().time() - start_time
+            logger.error("Retrieval error for %s after %.2fs: %s", current_tool_name, elapsed, e)
             ctx.metadata[f"retrieval_error_{current_tool_name}"] = str(e)
             ctx.metrics["retrieval_errors"] = ctx.metrics.get("retrieval_errors", 0) + 1
 
@@ -468,9 +468,8 @@ class AnswerNode(BaseNode):
         context_text = "\n\n".join(context_parts)
         history_text = "\n".join(f"{m['role']}: {m['content']}" for m in ctx.chat_history)
 
-        # <<< NEW: warn explicitly when answering with no context
         if not context_text:
-            logger.warning(f"[{self.name}] Answering with empty context")
+            logger.warning("[%s] Answering with empty context", self.name)
 
         prompt = self.answer_prompt.format(
             context=context_text if context_text else "Context not found.",
@@ -479,36 +478,35 @@ class AnswerNode(BaseNode):
             confidence_score=ctx.confidence_score if ctx.confidence_score is not None else "not evaluated"
         )
 
-        logger.debug(f"[{self.name}] Prompt: {prompt[:500]}...")
+        logger.debug("[%s] Prompt: %s...", self.name, prompt[:500])
         logger.info(
-            f"[{self.name}] Request: context_docs={len(ctx.current_context)}, "
-            f"query_len={len(ctx.query)}, "
-            f"confidence_score={ctx.confidence_score}"  # <<< NEW: include confidence
+            "[%s] Request: context_docs=%d, query_len=%d, confidence_score=%s",
+            self.name, len(ctx.current_context), len(ctx.query), ctx.confidence_score
         )
 
-        start_time = asyncio.get_event_loop().time()
+        start_time = asyncio.get_running_loop().time()
         try:
             ctx.final_answer = await self.llm.generate_async(prompt, options={"temperature": 0.4})
 
-            elapsed = asyncio.get_event_loop().time() - start_time
+            elapsed = asyncio.get_running_loop().time() - start_time
             self._track_llm_metric(ctx, elapsed, "answer")
 
             answer_len = len(ctx.final_answer) if ctx.final_answer else 0
-            logger.info(f"[{self.name}] Response: len={answer_len}, time={elapsed:.2f}s")
+            logger.info("[%s] Response: len=%d, time=%.2fs", self.name, answer_len, elapsed)
 
             if answer_len < 50:
-                logger.warning(f"[{self.name}] Unusually short answer ({answer_len} chars)")
+                logger.warning("[%s] Unusually short answer (%d chars)", self.name, answer_len)
                 ctx.metrics["short_answers"] = ctx.metrics.get("short_answers", 0) + 1
             elif answer_len > 5000:
-                logger.warning(f"[{self.name}] Unusually long answer ({answer_len} chars)")
+                logger.warning("[%s] Unusually long answer (%d chars)", self.name, answer_len)
                 ctx.metrics["long_answers"] = ctx.metrics.get("long_answers", 0) + 1
 
             ctx.metadata["answer_generated"] = True
             ctx.metrics["answer_success"] = ctx.metrics.get("answer_success", 0) + 1
 
         except Exception as e:
-            elapsed = asyncio.get_event_loop().time() - start_time
-            logger.error(f"[{self.name}] Error after {elapsed:.2f}s: {e}")
+            elapsed = asyncio.get_running_loop().time() - start_time
+            logger.error("[%s] Error after %.2fs: %s", self.name, elapsed, e)
             ctx.final_answer = "Sorry, an error occurred while generating the answer."
             ctx.metadata["answer_error"] = str(e)
             ctx.metrics["answer_errors"] = ctx.metrics.get("answer_errors", 0) + 1
@@ -522,9 +520,9 @@ class GiveInfoNode:
     """
 
     async def process(self, ctx: AgentContext) -> AgentContext:
-        logger.info(  # <<< NEW
-            f"[give_info] Returning {len(ctx.current_context)} docs "
-            f"without answer generation (info_only mode)"
+        logger.info(
+            "[give_info] Returning %d docs without answer generation (info_only mode)",
+            len(ctx.current_context)
         )
         ctx.metadata["info_only"] = True
         ctx.metadata["answer_generated"] = False
@@ -549,12 +547,12 @@ class RerankerNode:
         docs = ctx.current_context
         if not docs:
             ctx.metrics["rerank_skipped_empty"] = ctx.metrics.get("rerank_skipped_empty", 0) + 1
-            logger.info(f"[{self.name}] No documents to rerank, skipping")
+            logger.info("[%s] No documents to rerank, skipping", self.name)
             return ctx
 
         logger.info(
-            f"[{self.name}] Starting rerank: docs={len(docs)}, "
-            f"num_docs={self.num_docs}, query_len={len(ctx.query)}"
+            "[%s] Starting rerank: docs=%d, num_docs=%d, query_len=%d",
+            self.name, len(docs), self.num_docs, len(ctx.query)
         )
 
         serialized_docs: list[dict[str, Any]] = []
@@ -568,38 +566,36 @@ class RerankerNode:
                 }
             )
 
-        import json
         prompt = self.rerank_prompt.format(
             query=ctx.query,
             documents=json.dumps(serialized_docs, ensure_ascii=False),
             num_docs=self.num_docs,
         )
 
-        logger.debug(f"[{self.name}] Prompt: {prompt[:500]}...")
+        logger.debug("[%s] Prompt: %s...", self.name, prompt[:500])
         logger.info(
-            f"[{self.name}] Request: docs={len(serialized_docs)}, "
-            f"num_docs={self.num_docs}, query_len={len(ctx.query)}"
+            "[%s] Request: docs=%d, num_docs=%d, query_len=%d",
+            self.name, len(serialized_docs), self.num_docs, len(ctx.query)
         )
 
-        start_time = asyncio.get_event_loop().time()
+        start_time = asyncio.get_running_loop().time()
         response = ""
         try:
             response = await self.llm.generate_async(
                 prompt,
                 options={"temperature": 0.1},
             )
-            elapsed = asyncio.get_event_loop().time() - start_time
+            elapsed = asyncio.get_running_loop().time() - start_time
             self._track_llm_metric(ctx, elapsed, "reranker")
 
-            logger.info(f"[{self.name}] Response: len={len(response)}, time={elapsed:.2f}s")
-            logger.debug(f"[{self.name}] Raw response: {response.strip()[:500]}")
+            logger.info("[%s] Response: len=%d, time=%.2fs", self.name, len(response), elapsed)
+            logger.debug("[%s] Raw response: %s", self.name, response.strip()[:500])
 
             text = response.strip()
             if not text:
                 raise ValueError("Empty reranker response")
 
             first_line = text.splitlines()[0]
-
             first_line = first_line.replace(";", ",")
             parts = [p.strip() for p in first_line.split(",")]
 
@@ -610,14 +606,12 @@ class RerankerNode:
                 try:
                     indices.append(int(p))
                 except ValueError:
-                    logger.debug(f"[{self.name}] Cannot cast {p!r} to int, skipping")
+                    logger.debug("[%s] Cannot cast %r to int, skipping", self.name, p)
 
             if not indices:
-                ctx.metrics["rerank_empty_selection"] = ctx.metrics.get(
-                    "rerank_empty_selection", 0
-                ) + 1
+                ctx.metrics["rerank_empty_selection"] = ctx.metrics.get("rerank_empty_selection", 0) + 1
                 logger.warning(
-                    f"[{self.name}] Rerank returned empty/invalid indices, keeping original context"
+                    "[%s] Rerank returned empty/invalid indices, keeping original context", self.name
                 )
                 return ctx
 
@@ -631,19 +625,17 @@ class RerankerNode:
                     break
 
             if not cleaned:
-                ctx.metrics["rerank_empty_selection"] = ctx.metrics.get(
-                    "rerank_empty_selection", 0
-                ) + 1
+                ctx.metrics["rerank_empty_selection"] = ctx.metrics.get("rerank_empty_selection", 0) + 1
                 logger.warning(
-                    f"[{self.name}] Rerank indices out of range, keeping original context"
+                    "[%s] Rerank indices out of range, keeping original context", self.name
                 )
                 return ctx
 
             new_context = [ctx.current_context[i] for i in cleaned]
 
             logger.info(
-                f"[{self.name}] Kept {len(new_context)} / {len(ctx.current_context)} docs "
-                f"after rerank"
+                "[%s] Kept %d / %d docs after rerank",
+                self.name, len(new_context), len(ctx.current_context)
             )
 
             ctx.metadata["rerank_indices"] = cleaned
@@ -655,9 +647,9 @@ class RerankerNode:
             ctx.metrics["docs_after_rerank"] = len(ctx.current_context)
 
         except Exception as e:
-            elapsed = asyncio.get_event_loop().time() - start_time
-            logger.error(f"[{self.name}] Error after {elapsed:.2f}s: {e}")
-            logger.error(f"[{self.name}] RAW OUTPUT (truncated): {response.strip()[:300]!r}")
+            elapsed = asyncio.get_running_loop().time() - start_time
+            logger.error("[%s] Error after %.2fs: %s", self.name, elapsed, e)
+            logger.error("[%s] RAW OUTPUT (truncated): %r", self.name, response.strip()[:300])
             ctx.metadata["rerank_error"] = str(e)
             ctx.metrics["rerank_errors"] = ctx.metrics.get("rerank_errors", 0) + 1
 

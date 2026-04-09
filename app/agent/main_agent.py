@@ -69,7 +69,7 @@ class MultiStepRAGAgent:
 
         self._retriever = RetrievalNode(tools_registry=self._tools_registry)
 
-        self._reranker = None #RerankerNode(
+        self._reranker = None  # RerankerNode(
         #     llm=llm,
         #     rerank_prompt=reranker_prompt,
         #     num_docs=rerank_top_k,
@@ -86,12 +86,11 @@ class MultiStepRAGAgent:
         """
         Execute the agent workflow for a given query.
         """
-        overall_start = asyncio.get_event_loop().time()
+        overall_start = asyncio.get_running_loop().time()
 
         logger.info(
-            f"[{self.name}] Execute start: query_len={len(query)}, "
-            f"history_turns={len(chat_history or [])}, "
-            f"raw_search={self.settings.raw_search}"
+            "[%s] Execute start: query_len=%d, history_turns=%d, raw_search=%s",
+            self.name, len(query), len(chat_history or []), self.settings.raw_search
         )
 
         ctx = AgentContext(
@@ -101,22 +100,23 @@ class MultiStepRAGAgent:
         )
 
         if self.settings.raw_search:
-            logger.info(f"[{self.name}] Raw search mode enabled")
+            logger.info("[%s] Raw search mode enabled", self.name)
             ctx = await self._execute_raw_search(ctx)
             if ctx.current_context:
                 next_state = await self._router.process(ctx)
                 logger.info(
-                    f"[{self.name}] Raw search router decision: {next_state.value}, "
-                    f"confidence={ctx.confidence_score}"
+                    "[%s] Raw search router decision: %s, confidence=%s",
+                    self.name, next_state.value, ctx.confidence_score
                 )
                 if next_state in (AgentState.ANSWERING, AgentState.GIVE_INFO):
                     ctx = await self._handle_terminal_state(ctx, next_state)
                     result = self._build_response(ctx, overall_start)
                     logger.info(
-                        f"[{self.name}] Execute done (raw_search fast-path): "
-                        f"iterations={result['iterations']}, "
-                        f"final_confidence={result['final_confidence']}, "
-                        f"total_time={result['metrics'].get('total_time', 0):.2f}s"
+                        "[%s] Execute done (raw_search fast-path): iterations=%d, "
+                        "final_confidence=%s, total_time=%.2fs",
+                        self.name, result["iterations"],
+                        result["final_confidence"],
+                        result["metrics"].get("total_time", 0)
                     )
                     return result
             state = AgentState.ROUTING if not ctx.current_context else next_state
@@ -135,8 +135,8 @@ class MultiStepRAGAgent:
             if loop_counter > max_loop_guard:
                 ctx.metrics["loop_guard_triggered"] = True
                 logger.error(
-                    f"[{self.name}] Loop guard triggered after {loop_counter} steps "
-                    f"(max={max_loop_guard}, iterations={ctx.current_iterations})"
+                    "[%s] Loop guard triggered after %d steps (max=%d, iterations=%d)",
+                    self.name, loop_counter, max_loop_guard, ctx.current_iterations
                 )
                 raise RuntimeError(
                     f"Agent loop exceeded safety limit of {max_loop_guard} iterations"
@@ -144,19 +144,19 @@ class MultiStepRAGAgent:
 
             ctx.metadata["current_state"] = state.value
             logger.debug(
-                f"[{self.name}] State={state.value}, "
-                f"iteration={ctx.current_iterations}, "
-                f"tool_index={ctx.current_tool_index}, "
-                f"context_docs={len(ctx.current_context)}"
+                "[%s] State=%s, iteration=%d, tool_index=%d, context_docs=%d",
+                self.name, state.value, ctx.current_iterations,
+                ctx.current_tool_index, len(ctx.current_context)
             )
 
             state = await self._process_state(ctx, state, confidence_history)
 
         result = self._build_response(ctx, overall_start)
         logger.info(
-            f"[{self.name}] Execute done: iterations={result['iterations']}, "
-            f"final_confidence={result['final_confidence']}, "
-            f"total_time={result['metrics'].get('total_time', 0):.2f}s"
+            "[%s] Execute done: iterations=%d, final_confidence=%s, total_time=%.2fs",
+            self.name, result["iterations"],
+            result["final_confidence"],
+            result["metrics"].get("total_time", 0)
         )
         return result
 
@@ -164,10 +164,10 @@ class MultiStepRAGAgent:
         """
         Execute direct search across all tools in parallel without query expansion.
         """
-        raw_search_start = asyncio.get_event_loop().time()
+        raw_search_start = asyncio.get_running_loop().time()
         logger.info(
-            f"[{self.name}] Raw search across {len(self._tools_registry)} tools "
-            f"for query_len={len(ctx.query)}"
+            "[%s] Raw search across %d tools for query_len=%d",
+            self.name, len(self._tools_registry), len(ctx.query)
         )
 
         async def search_with_tool(tool: Any) -> tuple[str, list[dict], Optional[Exception]]:
@@ -178,7 +178,7 @@ class MultiStepRAGAgent:
                     doc["iteration"] = 0
                 return tool.name, results, None
             except Exception as e:
-                logger.error(f"[{self.name}] Raw search failed for {tool.name}: {e}")
+                logger.error("[%s] Raw search failed for %s: %s", self.name, tool.name, e)
                 return tool.name, [], e
 
         search_tasks = [search_with_tool(tool) for tool in self._tools_registry.values()]
@@ -215,17 +215,18 @@ class MultiStepRAGAgent:
 
             ctx.metrics["docs_retrieved"] += new_docs_count
             logger.debug(
-                f"[{self.name}] Raw search tool {tool_name}: {new_docs_count} new documents"
+                "[%s] Raw search tool %s: %d new documents",
+                self.name, tool_name, new_docs_count
             )
 
         ctx.metrics["raw_search_time"] = (
-            asyncio.get_event_loop().time() - raw_search_start
+            asyncio.get_running_loop().time() - raw_search_start
         )
 
         logger.info(
-            f"[{self.name}] Raw search completed: {total_docs} documents from "
-            f"{len(self._tools_registry)} tools in {ctx.metrics['raw_search_time']:.2f}s "
-            f"(errors: {error_count})"
+            "[%s] Raw search completed: %d documents from %d tools in %.2fs (errors: %d)",
+            self.name, total_docs, len(self._tools_registry),
+            ctx.metrics["raw_search_time"], error_count
         )
 
         return ctx
@@ -239,9 +240,9 @@ class MultiStepRAGAgent:
         Process terminal states (ANSWERING or GIVE_INFO) with a single rerank before them.
         """
         logger.info(
-            f"[{self.name}] Handle terminal state: {state.value}, "
-            f"docs={len(ctx.current_context)}, "
-            f"reranker={'on' if self._reranker else 'off'}"
+            "[%s] Handle terminal state: %s, docs=%d, reranker=%s",
+            self.name, state.value, len(ctx.current_context),
+            'on' if self._reranker else 'off'
         )
 
         # Single rerank step before final answer / info, if configured
@@ -271,11 +272,9 @@ class MultiStepRAGAgent:
                 }
             )
             logger.info(
-                f"[{self.name}] Routing result: next_state={next_state.value}, "
-                f"confidence={ctx.confidence_score}, "
-                f"iteration={ctx.current_iterations}"
+                "[%s] Routing result: next_state=%s, confidence=%s, iteration=%d",
+                self.name, next_state.value, ctx.confidence_score, ctx.current_iterations
             )
-            # If router decides to ANSWER / GIVE_INFO, go through terminal handler
             if next_state in (AgentState.ANSWERING, AgentState.GIVE_INFO):
                 ctx = await self._handle_terminal_state(ctx, next_state)
                 return AgentState.DONE
@@ -285,14 +284,15 @@ class MultiStepRAGAgent:
             ctx = await self._tool_selector.process(ctx)
             if ctx.selected_tools:
                 logger.info(
-                    f"[{self.name}] Tools selected (iteration {ctx.current_iterations}): "
-                    f"{ctx.selected_tools}"
+                    "[%s] Tools selected (iteration %d): %s",
+                    self.name, ctx.current_iterations, ctx.selected_tools
                 )
                 ctx.current_tool_index = 0
                 return AgentState.TOOL_PROCESSING
             else:
                 logger.warning(
-                    f"[{self.name}] No tools selected (iteration {ctx.current_iterations})"
+                    "[%s] No tools selected (iteration %d)",
+                    self.name, ctx.current_iterations
                 )
                 ctx.metadata["tool_selection_empty"] = True
                 ctx.metrics["empty_tool_selections"] = (
@@ -310,16 +310,16 @@ class MultiStepRAGAgent:
         elif state == AgentState.TOOL_PROCESSING:
             if ctx.current_tool_index < len(ctx.selected_tools):
                 logger.debug(
-                    f"[{self.name}] Processing tool "
-                    f"{ctx.selected_tools[ctx.current_tool_index]} "
-                    f"({ctx.current_tool_index + 1}/{len(ctx.selected_tools)})"
+                    "[%s] Processing tool %s (%d/%d)",
+                    self.name, ctx.selected_tools[ctx.current_tool_index],
+                    ctx.current_tool_index + 1, len(ctx.selected_tools)
                 )
                 return AgentState.QUERY_EXPANSION
             else:
                 ctx.current_iterations += 1
                 logger.info(
-                    f"[{self.name}] Completed tool pass, moving to ROUTING, "
-                    f"iterations={ctx.current_iterations}"
+                    "[%s] Completed tool pass, moving to ROUTING, iterations=%d",
+                    self.name, ctx.current_iterations
                 )
                 return AgentState.ROUTING
 
@@ -333,9 +333,8 @@ class MultiStepRAGAgent:
             return AgentState.TOOL_PROCESSING
 
         elif state in (AgentState.ANSWERING, AgentState.GIVE_INFO):
-            # In practice this path should be hit only for raw_search or forced states
             logger.info(
-                f"[{self.name}] Terminal state reached explicitly: {state.value}"
+                "[%s] Terminal state reached explicitly: %s", self.name, state.value
             )
             ctx = await self._handle_terminal_state(ctx, state)
             return AgentState.DONE
@@ -361,15 +360,13 @@ class MultiStepRAGAgent:
                 ctx.metrics["search_total_time"] / ctx.metrics["search_calls"]
             )
 
-        ctx.metrics["total_time"] = asyncio.get_event_loop().time() - overall_start
+        ctx.metrics["total_time"] = asyncio.get_running_loop().time() - overall_start
         ctx.metrics["total_iterations"] = ctx.current_iterations
 
         logger.info(
-            f"[{self.name}] Build response: "
-            f"iterations={ctx.current_iterations}, "
-            f"docs={len(ctx.current_context)}, "
-            f"tools_used={list(ctx.tool_results.keys())}, "
-            f"total_time={ctx.metrics['total_time']:.2f}s"
+            "[%s] Build response: iterations=%d, docs=%d, tools_used=%s, total_time=%.2fs",
+            self.name, ctx.current_iterations, len(ctx.current_context),
+            list(ctx.tool_results.keys()), ctx.metrics["total_time"]
         )
 
         return {

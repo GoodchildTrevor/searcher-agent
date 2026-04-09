@@ -7,7 +7,7 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.agent.main_agent import MultiStepRAGAgent
-from app.tools.vector_search import SearchTool, SearchConfig
+from app.tools.vector_search import SearchTool
 from app.core.llm import OllamaLLM
 from app.core.prompts import (
     ROUTER_PROMPT, 
@@ -37,11 +37,6 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing RAG Agent service...")
     tools = []
     try:
-        search_config = SearchConfig(
-            base_url=SEARCH_URL,
-            timeout=15,
-            max_retries=2
-        )
         for collection in COLLECTIONS:
             tool = SearchTool(
                 collection_name=collection,
@@ -117,7 +112,7 @@ async def process_query(
     :raises HTTPException: If agent initialization fails or execution errors occur.
     """
     try:
-        logger.info(f"Processing query: {request.query[:100]}...")
+        logger.info("Processing query: %s...", request.query[:100])
 
         # Select tools
         if request.tools:
@@ -126,18 +121,18 @@ async def process_query(
 
             invalid_tools = requested_names - available_names
             if invalid_tools:
-                logger.warning(f"Invalid tool names requested: {invalid_tools}")
+                logger.warning("Invalid tool names requested: %s", invalid_tools)
 
             selected_tools = [t for t in tools if t.name in requested_names]
             if not selected_tools:
                 logger.warning(
-                    f"No valid tools requested: {request.tools}, using all available"
+                    "No valid tools requested: %s, using all available", request.tools
                 )
                 selected_tools = tools
         else:
             selected_tools = tools
 
-        logger.info(f"Using tools: {[t.name for t in selected_tools]}")
+        logger.info("Using tools: %s", [t.name for t in selected_tools])
 
         agent = MultiStepRAGAgent(
             llm=llm,
@@ -187,6 +182,8 @@ async def process_query(
             sources=sources,
             metadata=result.get("metadata", {}),
             metrics=result.get("metrics", {}),
+            tools_used=result.get("tools_used", []),
+            tool_queries=result.get("tool_queries", {}),
         )
 
         return response
@@ -201,7 +198,7 @@ async def process_query(
         logger.error("Query processing error: %s", e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal error during query processing: {str(e)}",
+            detail="Internal error during query processing.",
         )
 
 

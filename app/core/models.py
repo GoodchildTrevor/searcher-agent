@@ -8,9 +8,9 @@ class AgentConfigRequest(BaseModel):
     All fields are optional and will use default values if not provided.
     """
     query: str = Field(..., min_length=1, description="User's question or query")
-    tools: list = Field (
+    tools: list[str] = Field(
         default_factory=list,
-        description="List of essential instruments"
+        description="List of tool names to use for search"
     )
     chat_history: list[dict[str, str]] = Field(
         default_factory=list,
@@ -46,7 +46,7 @@ class SourceDocument(BaseModel):
     relevance: Optional[float] = Field(default=None, description="Relevance score")
     tool: Optional[str] = Field(default=None, description="Tool that retrieved this document")
     page_start: int = Field(default=1, description="Start page in the source document")
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -69,7 +69,9 @@ class AgentResponse(BaseModel):
     sources: list[SourceDocument] = Field(default_factory=list, description="Retrieved source documents")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Execution metadata")
     metrics: dict[str, Any] = Field(default_factory=dict, description="Performance metrics")
-    
+    tools_used: list[str] = Field(default_factory=list, description="Names of tools used during execution")
+    tool_queries: dict[str, list[str]] = Field(default_factory=dict, description="Queries sent to each tool")
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -84,13 +86,16 @@ class AgentResponse(BaseModel):
                         "tool": "vector_search_docs"
                     }
                 ],
+                "tools_used": ["vector_search_docs"],
+                "tool_queries": {
+                    "vector_search_docs": [
+                        "How to configure OAuth?",
+                        "OAuth setup guide"
+                    ]
+                },
                 "metadata": {
                     "router_decision": "sufficient_context (confidence=0.85)",
-                    "retrieved_count": 5,
-                    "confidence_history": [
-                        {"iteration": 0, "confidence": 0.3},
-                        {"iteration": 1, "confidence": 0.85}
-                    ]
+                    "retrieved_count": 5
                 },
                 "metrics": {
                     "llm_calls": 4,
@@ -98,22 +103,7 @@ class AgentResponse(BaseModel):
                     "search_calls": 2,
                     "search_total_time": 0.8,
                     "docs_retrieved": 5,
-                    "tool_calls": {
-                        "vector_search_docs": 2,
-                    },
-                    "tool_performance": {
-                        "vector_search_docs": {
-                            "calls": 2,
-                            "total_time": 0.8,
-                            "docs_retrieved": 5
-                        }
-                    },
-                    "total_time": 4.5,
-                    "avg_llm_time": 0.8,
-                    "avg_search_time": 0.4,
-                    "routing_decisions": 2,
-                    "high_confidence_routes": 1,
-                    "search_routes": 1
+                    "total_time": 4.5
                 }
             }
         }
@@ -126,7 +116,7 @@ class HealthResponse(BaseModel):
     """
     status: str = Field(..., description="Service status")
     version: str = Field(..., description="Service version")
-    
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
