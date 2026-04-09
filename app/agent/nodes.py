@@ -530,18 +530,39 @@ class GiveInfoNode:
         return ctx
 
 
-class RerankerNode:
-    name = "reranker"
+class RerankerNode(BaseNode):
+    """
+    Node responsible for reranking retrieved documents by relevance.
+    Inherits BaseNode to reuse _track_llm_metric and _extract_json (#17).
+    """
 
-    def __init__(self, llm, rerank_prompt: str, num_docs: int = 10):
-        self.llm = llm
+    def __init__(self, llm: Any, rerank_prompt: str, num_docs: int = 10):
+        super().__init__(llm, "reranker")
         self.rerank_prompt = rerank_prompt
         self.num_docs = num_docs
 
-    def _track_llm_metric(self, ctx, elapsed: float, kind: str) -> None:
-        ctx.metrics["llm_calls"] = ctx.metrics.get("llm_calls", 0) + 1
-        ctx.metrics["llm_total_time"] = ctx.metrics.get("llm_total_time", 0.0) + elapsed
-        ctx.metrics[f"{kind}_time"] = elapsed
+    @staticmethod
+    def _parse_indices(response: str) -> list[int]:
+        """
+        Robustly extract a list of integer indices from LLM output.
+        Tries JSON array parse first; falls back to comma-separated integers (#18).
+        """
+        text = response.strip()
+        if not text:
+            return []
+
+        # Try JSON array anywhere in the response
+        json_match = re.search(r'\[[\d\s,]+\]', text)
+        if json_match:
+            try:
+                parsed = json.loads(json_match.group())
+                if isinstance(parsed, list):
+                    return [int(x) for x in parsed]
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # Fallback: collect all integers from the full text
+        return [int(m) for m in re.findall(r'\d+', text)]
 
     async def process(self, ctx: AgentContext) -> AgentContext:
         docs = ctx.current_context
@@ -591,22 +612,7 @@ class RerankerNode:
             logger.info("[%s] Response: len=%d, time=%.2fs", self.name, len(response), elapsed)
             logger.debug("[%s] Raw response: %s", self.name, response.strip()[:500])
 
-            text = response.strip()
-            if not text:
-                raise ValueError("Empty reranker response")
-
-            first_line = text.splitlines()[0]
-            first_line = first_line.replace(";", ",")
-            parts = [p.strip() for p in first_line.split(",")]
-
-            indices: list[int] = []
-            for p in parts:
-                if not p:
-                    continue
-                try:
-                    indices.append(int(p))
-                except ValueError:
-                    logger.debug("[%s] Cannot cast %r to int, skipping", self.name, p)
+            indices = self._parse_indices(response)
 
             if not indices:
                 ctx.metrics["rerank_empty_selection"] = ctx.metrics.get("rerank_empty_selection", 0) + 1
