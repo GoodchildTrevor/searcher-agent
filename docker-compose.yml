@@ -1,0 +1,9 @@
+services:
+  searcher-agent:
+    build: .
+    container_name: searcher-agent
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs 
