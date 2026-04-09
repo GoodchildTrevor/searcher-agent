@@ -4,7 +4,7 @@ import logging
 import re
 from typing import Any, Optional
 
-from app.configs.agent_settings import AgentContext, AgentState, AgentNode, BaseNode
+from app.core.agent_settings import AgentContext, AgentState, AgentNode, BaseNode
 
 logger = logging.getLogger(__name__)
 
