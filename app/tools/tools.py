@@ -86,6 +86,10 @@ class SearchTool:
     This tool communicates with an external search API via HTTP POST requests
     and supports both single and batch query execution with concurrency control.
     
+    Must be used as an async context manager (or have __aenter__/__aexit__ called
+    explicitly) so that the shared aiohttp.ClientSession is properly created and
+    closed.
+    
     :cvar name: Tool identifier used by the agent for selection.
     :cvar description: Human-readable description for LLM-based tool selection.
     """
@@ -194,6 +198,9 @@ class SearchTool:
     ) -> list[dict[str, Any]]:
         """
         Asynchronous document search (protocol implementation).
+
+        Uses the shared aiohttp.ClientSession created in __aenter__.
+        Falls back to a temporary session if called outside context manager.
         
         :param query: Search query string.
         :type query: str
@@ -204,7 +211,6 @@ class SearchTool:
         :return: List of formatted document dictionaries.
         :rtype: list[dict[str, Any]]
         """
-        
         payload = {
             "text": query,
             "method": method,
@@ -212,10 +218,21 @@ class SearchTool:
             "limit": top_k
         }
 
-        async with aiohttp.ClientSession() as session:
+        # Use shared session when available; create a temporary one otherwise.
+        owned_session: Optional[aiohttp.ClientSession] = None
+        if self._session is None:
+            logger.warning(
+                "search_async called outside context manager — creating a temporary session. "
+                "Prefer using SearchTool as an async context manager."
+            )
+            owned_session = aiohttp.ClientSession()
+
+        session = owned_session or self._session
+
+        try:
             for attempt in range(self.config.max_retries + 1):
                 try:
-                    async with session.post(
+                    async with session.post(  # type: ignore[union-attr]
                         self.config.base_url,
                         json=payload,
                         timeout=aiohttp.ClientTimeout(total=self.config.timeout)
@@ -229,11 +246,11 @@ class SearchTool:
                             logger.warning(f"No results found for query: '{query}'")
                             return []
 
-                        formatted_docs = []
-                        for doc in documents:
-                            formatted = self._format_document(doc)
-                            if formatted:
-                                formatted_docs.append(formatted)
+                        formatted_docs = [
+                            fmt
+                            for doc in documents
+                            if (fmt := self._format_document(doc)) is not None
+                        ]
 
                         return formatted_docs[:top_k]
 
@@ -248,6 +265,9 @@ class SearchTool:
                     if attempt == self.config.max_retries:
                         raise
                     await asyncio.sleep(1)
+        finally:
+            if owned_session is not None:
+                await owned_session.close()
 
         return []
 
