@@ -63,6 +63,7 @@ class MultiStepRAGAgent:
         self._expander = ExpansionNode(
             llm=llm,
             expansion_prompt=expansion_prompt,
+            tools_registry=self._tools_registry,
             expansion_count=self.settings.expansion_count,
             timeout=self.settings.expansion_timeout,
         )

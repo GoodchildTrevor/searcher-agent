@@ -14,6 +14,8 @@ class RouterNode(BaseNode):
     Node responsible for evaluating context sufficiency.
     Uses binary decision (answer_found: true/false) rather than
     a float confidence score, which is more reliable on small models.
+    When answer_found is True, additionally calls evaluate_confidence_async
+    on the LLM (if supported) to get a real float score.
     """
 
     def __init__(
@@ -94,7 +96,31 @@ class RouterNode(BaseNode):
             )
             answer_found = False
 
-        ctx.confidence_score = 1.0 if answer_found else 0.0
+        # When answer is found, get a real float confidence via evaluate_confidence_async.
+        # Fall back to 1.0/0.0 for LLMs that don't implement the method.
+        if answer_found:
+            try:
+                ctx.confidence_score = await self.llm.evaluate_confidence_async(
+                    context=context_text[:2000],
+                    query=ctx.query,
+                )
+                logger.info(
+                    "[%s] Float confidence score: %.3f", self.name, ctx.confidence_score
+                )
+            except AttributeError:
+                ctx.confidence_score = 1.0
+                logger.debug(
+                    "[%s] LLM does not support evaluate_confidence_async, using 1.0",
+                    self.name
+                )
+            except Exception as e:
+                ctx.confidence_score = 1.0
+                logger.warning(
+                    "[%s] evaluate_confidence_async failed (%s), using 1.0", self.name, e
+                )
+        else:
+            ctx.confidence_score = 0.0
+
         ctx.metadata["router_raw_response"] = (
             response if "response" in locals() else ""
         )
@@ -238,17 +264,20 @@ class ToolSelectionNode(BaseNode):
 class ExpansionNode(BaseNode):
     """
     Node responsible for generating query variations.
+    Requires tools_registry to pass the real tool description into the prompt.
     """
 
     def __init__(
         self,
         llm: Any,
         expansion_prompt: str,
+        tools_registry: dict[str, Any],
         expansion_count: int = 3,
         timeout: float = 30.0
     ):
         super().__init__(llm, "expansion")
         self.expansion_prompt = expansion_prompt
+        self.tools_registry = tools_registry
         self.expansion_count = expansion_count
         self.timeout = timeout
 
@@ -261,9 +290,14 @@ class ExpansionNode(BaseNode):
             return ctx
 
         current_tool_name = ctx.selected_tools[ctx.current_tool_index]
+        current_tool = self.tools_registry.get(current_tool_name)
+        tool_description = (
+            getattr(current_tool, "description", None) or "Search tool"
+        )
+
         logger.info(
-            "[%s] Expanding query for tool '%s' (tool %d/%d), count=%d",
-            self.name, current_tool_name,
+            "[%s] Expanding query for tool '%s' (description: %s) (tool %d/%d), count=%d",
+            self.name, current_tool_name, tool_description,
             ctx.current_tool_index + 1, len(ctx.selected_tools),
             self.expansion_count
         )
@@ -283,7 +317,7 @@ class ExpansionNode(BaseNode):
                         count=self.expansion_count,
                         query=ctx.query,
                         tool_name=current_tool_name,
-                        tool_description="Search tool",
+                        tool_description=tool_description,
                         previous_queries=previous_queries_str,
                         history=history_text if history_text else "History empty.",
                         iteration=ctx.current_iterations,
