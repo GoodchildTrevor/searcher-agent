@@ -5,6 +5,7 @@ import re
 from typing import Any, Optional
 
 from app.core.agent_settings import AgentContext, AgentState, AgentNode, BaseNode
+from app.core.trace import log_trace
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ class RouterNode(BaseNode):
             context=context_text[:3000]
         )
 
-        logger.debug("[%s] Prompt: %s...", self.name, prompt[:500])
+        log_trace("router_prompt", prompt=prompt)
         logger.info(
             "[%s] Request: query_len=%d, context_docs=%d, context_len=%d",
             self.name, len(ctx.query), len(ctx.current_context), len(context_text)
@@ -66,7 +67,7 @@ class RouterNode(BaseNode):
             self._track_llm_metric(ctx, elapsed, "router")
 
             logger.info("[%s] Response: len=%d, time=%.2fs", self.name, len(response), elapsed)
-            logger.debug("[%s] Raw response: %s", self.name, response.strip())
+            log_trace("router_response", response=response.strip(), answer_found=answer_found)
 
             try:
                 json_str = self._extract_json(response) or response.strip()
@@ -199,7 +200,7 @@ class ToolSelectionNode(BaseNode):
             tools=tools_desc,
         )
 
-        logger.debug("[%s] Prompt: %s...", self.name, prompt[:500])
+        log_trace("tool_selection_prompt", prompt=prompt)
         logger.info(
             "[%s] Request: query_len=%d, available_tools=%s, context_docs=%d",
             self.name, len(ctx.query), list(self.available_tools.keys()), len(ctx.current_context)
@@ -215,7 +216,7 @@ class ToolSelectionNode(BaseNode):
             elapsed = asyncio.get_running_loop().time() - start_time
             self._track_llm_metric(ctx, elapsed, "tool_selection")
             logger.info("[%s] Response: len=%d, time=%.2fs", self.name, len(response), elapsed)
-            logger.debug("[%s] Raw response: %s", self.name, response.strip())
+            log_trace("tool_selection_response", response=response.strip(), selected=ctx.selected_tools)
 
             json_str = self._extract_json(response)
             if json_str:
@@ -311,9 +312,7 @@ class ExpansionNode(BaseNode):
 
         start_time = asyncio.get_running_loop().time()
         try:
-            response = await asyncio.wait_for(
-                self.llm.generate_async(
-                    self.expansion_prompt.format(
+            prompt = self.expansion_prompt.format(
                         count=self.expansion_count,
                         query=ctx.query,
                         tool_name=current_tool_name,
@@ -322,7 +321,11 @@ class ExpansionNode(BaseNode):
                         history=history_text if history_text else "History empty.",
                         iteration=ctx.current_iterations,
                         max_iterations=ctx.max_iterations
-                    ),
+                    )
+            log_trace("expansion_prompt", tool=current_tool_name, prompt=prompt)
+            response = await asyncio.wait_for(
+                self.llm.generate_async(
+                    prompt,
                     options={"temperature": 0.8, "top_p": 0.9, "num_predict": 300}
                 ),
                 timeout=self.timeout
@@ -331,7 +334,6 @@ class ExpansionNode(BaseNode):
             elapsed = asyncio.get_running_loop().time() - start_time
             self._track_llm_metric(ctx, elapsed, "expansion")
             logger.info("[%s] Response: len=%d, time=%.2fs", self.name, len(response), elapsed)
-            logger.debug("[%s] Raw response: %s", self.name, response.strip())
 
             json_str = self._extract_json(response)
             if json_str:
@@ -348,6 +350,7 @@ class ExpansionNode(BaseNode):
                             self.name, len(ctx.tool_specific_queries[current_tool_name]),
                             current_tool_name, ctx.tool_specific_queries[current_tool_name]
                         )
+                        log_trace("expansion_response", tool=current_tool_name, queries=ctx.tool_specific_queries[current_tool_name])
                     else:
                         ctx.tool_specific_queries[current_tool_name] = [ctx.query]
                         ctx.metrics["expansion_invalid_format"] = ctx.metrics.get("expansion_invalid_format", 0) + 1
@@ -355,6 +358,7 @@ class ExpansionNode(BaseNode):
                             "[%s] Invalid expansion format for '%s', falling back to original query",
                             self.name, current_tool_name
                         )
+                        log_trace("expansion_response", tool=current_tool_name, queries=ctx.tool_specific_queries[current_tool_name])
                 except json.JSONDecodeError as e:
                     ctx.tool_specific_queries[current_tool_name] = [ctx.query]
                     ctx.metrics["expansion_json_error"] = ctx.metrics.get("expansion_json_error", 0) + 1
@@ -362,6 +366,7 @@ class ExpansionNode(BaseNode):
                         "[%s] JSON decode error for '%s': %s, falling back to original query",
                         self.name, current_tool_name, e
                     )
+                    log_trace("expansion_response", tool=current_tool_name, queries=ctx.tool_specific_queries[current_tool_name])
             else:
                 ctx.tool_specific_queries[current_tool_name] = [ctx.query]
                 ctx.metrics["expansion_no_json"] = ctx.metrics.get("expansion_no_json", 0) + 1
@@ -369,6 +374,7 @@ class ExpansionNode(BaseNode):
                     "[%s] No JSON found in response for '%s', falling back to original query",
                     self.name, current_tool_name
                 )
+                log_trace("expansion_response", tool=current_tool_name, queries=ctx.tool_specific_queries[current_tool_name])
 
         except asyncio.TimeoutError:
             elapsed = asyncio.get_running_loop().time() - start_time

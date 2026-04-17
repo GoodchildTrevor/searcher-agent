@@ -3,7 +3,7 @@ import logging
 from typing import Annotated, Any, Optional
 
 from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.agent.main_agent import MultiStepRAGAgent
@@ -17,7 +17,8 @@ from app.core.prompts import (
     TOOL_SELECTION_PROMPT,
 )
 from app.core.agent_settings import AgentSettings
-from app.core.consts import OLLAMA_URL, OLLAMA_MODEL, SEARCH_URL, COLLECTIONS
+from app.core.consts import OLLAMA_URL, OLLAMA_MODEL, SEARCH_URL, COLLECTIONS, API_KEY
+from app.core.trace import log_trace
 from app.core.models import AgentConfigRequest, AgentResponse, SourceDocument, HealthResponse
 
 logger = logging.getLogger(__name__)
@@ -98,7 +99,11 @@ async def health_check() -> HealthResponse:
     return HealthResponse(status="healthy", version="1.0.0")
 
 
-@app.post("/agent-query", response_model=AgentResponse, tags=["Agent"])
+def require_api_key(x_api_key: str = Header(...)):
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+@app.post("/agent-query", response_model=AgentResponse, tags=["Agent"], dependencies=[Depends(require_api_key)])
 async def process_query(
     request: AgentConfigRequest,
     tools: Annotated[list[SearchTool], Depends(get_tools)],
@@ -133,6 +138,7 @@ async def process_query(
             selected_tools = tools
 
         logger.info("Using tools: %s", [t.name for t in selected_tools])
+        log_trace("user_request", query=request.query, tools=request.tools, history_turns=len(request.chat_history))
 
         agent = MultiStepRAGAgent(
             llm=llm,
@@ -154,6 +160,13 @@ async def process_query(
         result = await agent.execute(
             query=request.query,
             chat_history=request.chat_history,
+        )
+        log_trace("agent_response",
+            query=request.query,
+            answer=result.get("answer", ""),
+            sources=[s["source"] for s in result.get("sources", [])],
+            iterations=result.get("iterations"),
+            confidence=result.get("final_confidence"),
         )
 
         logger.info(
