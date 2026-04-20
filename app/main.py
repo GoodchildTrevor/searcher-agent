@@ -1,6 +1,8 @@
 import asyncio
+from dotenv import load_detenv
 import logging
-from typing import Annotated, Any, Optional
+import os
+from typing import Annotated, Optional
 
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, status, Header
@@ -21,6 +23,9 @@ from app.core.consts import OLLAMA_URL, OLLAMA_MODEL, SEARCH_URL, COLLECTIONS, A
 from app.core.trace import log_trace
 from app.core.models import AgentConfigRequest, AgentResponse, SourceDocument, HealthResponse
 
+load_dotenv()
+SEARCH_API_KEY = os.getenv("SEARCH_API_KEY")
+
 logger = logging.getLogger(__name__)
 
 logging.basicConfig(
@@ -40,6 +45,7 @@ async def lifespan(app: FastAPI):
     try:
         for collection in COLLECTIONS:
             tool = SearchTool(
+                seacrh_api_key=SEARCH_API_KEY,
                 collection_name=collection,
                 max_concurrent=10,
                 name=f"vector_search_{collection}",
