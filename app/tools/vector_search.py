@@ -103,6 +103,7 @@ class SearchTool:
     
     def __init__(
         self,
+        seacrh_api_key: str,
         collection_name: str,
         config: Optional[SearchConfig] = None,
         max_concurrent: int = 10,
@@ -112,16 +113,12 @@ class SearchTool:
         """
         Initialize the search tool.
         :param collection_name: Name of qdrant's collection
-        :type_ collection_name: str
         :param config: Search configuration object.
-        :type config: Optional[SearchConfig]
         :param max_concurrent: Maximum number of concurrent requests in batch search.
-        :type max_concurrent: int
         :param name: Optional override for tool name (for multiple instances).
-        :type name: Optional[str]
         :param description: Optional override for tool description.
-        :type description: Optional[str]
         """
+        self.seacrh_api_key = seacrh_api_key
         self.collection_name = collection_name
         self.config = config or SearchConfig()
         self._semaphore: asyncio.Semaphore = asyncio.Semaphore(max_concurrent)
@@ -218,7 +215,6 @@ class SearchTool:
             "limit": top_k
         }
 
-        # Use shared session when available; create a temporary one otherwise.
         owned_session: Optional[aiohttp.ClientSession] = None
         if self._session is None:
             logger.warning(
@@ -232,8 +228,9 @@ class SearchTool:
         try:
             for attempt in range(self.config.max_retries + 1):
                 try:
-                    async with session.post(  # type: ignore[union-attr]
+                    async with session.post(
                         self.config.base_url,
+                        headers={"Authorization": f"Bearer {self.seacrh_api_key}"},
                         json=payload,
                         timeout=aiohttp.ClientTimeout(total=self.config.timeout)
                     ) as response:
