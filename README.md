@@ -1,86 +1,72 @@
-# MultiStep RAG Agent
+# Searcher Agent Project
 
-A Retrieval-Augmented Generation (RAG) agent that iteratively selects and queries multiple search tools to produce accurate answers.
+An advanced AI agent designed to search and retrieve information from vector databases using natural language queries. This project implements a sophisticated agentic workflow for intelligent document retrieval, analysis, and reasoning.
 
-## Features
+## 🚀 Features
 
-- Multi-tool support (vector search)
-- Intelligent routing to decide whether to search more or answer
-- Query expansion to generate better retrieval queries
-- Iterative refinement with configurable iteration limits
-- Async-first, production-ready API
+- **Vector Database Integration**: Connects with local vector stores (Qdrant, Chroma) for semantic search
+- **AI Agent Framework**: Built on LangGraph/Superagent architecture enabling multi-step reasoning capabilities  
+- **Natural Language Processing**: Converts user queries into optimized database searches and generates human-readable answers
+- **Docker Support**: Containerized deployment ready with Docker Compose
 
-## Quick start
+## 🛠 Tech Stack
 
-1. Copy environment variables:
-   cp .env.example .env
-   Edit .env and set API_KEY (required). Optionally enable tracing.
+- **Python 3.x** - Core application logic
+- **LangGraph / Superagent** - Agent orchestration framework
+- **Ollama + Llama Models** - Local Large Language Model integration
+- **Qdrant / ChromaDB** - Vector database backends for semantic search
+- **Docker & Docker Compose** - Containerization and environment management
 
-2. Install dependencies:
+## 📂 Project Structure
+
+```text
+searcher-agent/
+├── app/                  # Application source code
+│   ├── agent/            # Agent logic (nodes, main runner)
+│   │   ├── nodes.py      # Graph node definitions
+│   │   └── main_agent.py 
+│   ├── core/             # Core configuration & models
+│   │   ├── agent_settings.py
+│   │   ├── llm.py        # LLM initialization
+│   │   └── prompts.py    # System prompts templates
+│   ├── tools/            # Agent tool definitions (e.g., vector search)
+│   │   └── vector_search.py
+│   └── main.py           # Entry point
+├── Dockerfile            # Container build instructions
+├── docker-compose.yml    # Service orchestration
+├── requirements.txt      # Python dependencies
+└── .env.example          # Environment variable template
+```
+
+## ⚙️ Getting Started
+
+### Prerequisites
+- Docker & Docker Compose installed on your machine.
+- (Optional) Ollama running locally if not included in the container setup.
+
+### 1. Clone Repository
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/GoodchildTrevor/searcher-agent.git
+cd searcher-agent
 ```
 
-3. Run locally:
+### 2. Configuration
+Copy the example environment file and adjust settings as needed:
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8050 --reload
+cp .env.example .env
 ```
+Edit `.env` to configure your LLM provider, Vector Store connection details (e.g., Qdrant host/port), and API keys.
 
-Or with Docker Compose:
+### 3. Run with Docker Compose
+Build the image and start all services in detached mode:
 ```bash
-docker-compose up --build
+docker-compose up --build -d
 ```
 
-## Environment / Configuration
+## 📜 License
 
-Key variables in .env (see .env.example):
-- SEARCH_URL — vector search service URL
-- OLLAMA_URL, OLLAMA_MODEL — LLM backend
-- COLLECTIONS — comma-separated collections
-- API_KEY — required for /agent-query
-- AGENT_TRACE_ENABLED — set to `1` to enable JSONL trace logging
-- AGENT_TRACE_LOG_PATH — trace file path (default: /app/logs/traces.jsonl)
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
-## API
+---
 
-POST /agent-query (requires header X-API-KEY)
-
-Example (Python requests):
-```python
-import requests
-
-headers = {"X-API-KEY": "your-secret"}
-payload = {
-    "query": "What is the capital of France?",
-    "max_iterations": 3,
-    "expansion_count": 3,
-    "confidence_threshold": 0.7,
-    "should_answer": True,
-    "tools": []
-}
-
-resp = requests.post("http://localhost:8050/agent-query", json=payload, headers=headers)
-print(resp.status_code, resp.json())
-```
-
-Curl example:
-```bash
-curl -X POST http://localhost:8050/agent-query \
-  -H "Content-Type: application/json" \
-  -H "X-API-KEY: your-secret" \
-  -d '{"query":"Who invented the telephone?","max_iterations":2,"expansion_count":2,"confidence_threshold":0.5,"should_answer":true}'
-```
-
-## Tracing
-
-Enable prompt/response tracing for prompt-tuning or debugging:
-- Set AGENT_TRACE_ENABLED=1
-- Traces are written as one JSON object per line to AGENT_TRACE_LOG_PATH
-
-## Security
-
-The /agent-query endpoint requires API_KEY (X-API-KEY header). Do not expose this service publicly without proper network controls.
-
-## License
-
-See LICENSE file.
+*Built with LangGraph, Ollama, and modern AI agent frameworks.*
